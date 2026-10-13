@@ -12,6 +12,11 @@ use crate::{
 };
 use std::ops::AddAssign;
 
+// Sundance: added to Z3 in the `z3` submodule, and not in z3-sys.
+unsafe extern "C" {
+    fn Z3_solver_internalize(c: Z3_context, s: Z3_solver, a: Z3_ast);
+}
+
 impl Solver {
     pub(crate) unsafe fn wrap(ctx: &Context, z3_slv: Z3_solver) -> Solver {
         unsafe {
@@ -72,6 +77,26 @@ impl Solver {
     /// Get this solver's context.
     pub fn get_context(&self) -> &Context {
         &self.ctx
+    }
+
+    /// Internalize `ast` in the solver without asserting it (Sundance's
+    /// patched Z3 only). The solver creates its internal representation of
+    /// `ast` outside every scope, e.g. a Boolean variable for an atom and
+    /// arithmetic tableau columns for its terms, as it would for an assertion
+    /// containing `ast`, but assumes nothing about `ast`. Assertions that
+    /// contain `ast` later reuse that representation, so a pop doesn't remove
+    /// it. Panics if Z3 reports an error, e.g. for a solver not built on the
+    /// SMT core.
+    pub fn internalize<T: Ast>(&self, ast: &T) {
+        debug!("internalize: {ast:?}");
+        unsafe {
+            Z3_solver_internalize(self.ctx.z3_ctx.0, self.z3_slv, ast.get_z3_ast());
+        }
+        let code = unsafe { Z3_get_error_code(self.ctx.z3_ctx.0) };
+        assert!(
+            code == ErrorCode::OK,
+            "Z3_solver_internalize failed: {code:?}"
+        );
     }
 
     /// Assert a constraint into the solver.
